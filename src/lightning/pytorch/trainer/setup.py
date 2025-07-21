@@ -99,7 +99,7 @@ def _init_debugging_flags(
         trainer.limit_test_batches = _determine_batch_limits(limit_test_batches, "limit_test_batches")
         trainer.limit_predict_batches = _determine_batch_limits(limit_predict_batches, "limit_predict_batches")
         trainer.num_sanity_val_steps = float("inf") if num_sanity_val_steps == -1 else num_sanity_val_steps
-        if trainer._val_check_time is not None:
+        if trainer._val_check_time is None:
             trainer.val_check_interval = _determine_batch_limits(val_check_interval, "val_check_interval")
 
     if overfit_batches_enabled:
