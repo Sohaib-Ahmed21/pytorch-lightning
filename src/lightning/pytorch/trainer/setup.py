@@ -32,6 +32,7 @@ from lightning.pytorch.profilers import (
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.imports import _habana_available_and_importable
 from lightning.pytorch.utilities.rank_zero import rank_zero_info, rank_zero_warn
+from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
 
 def _init_debugging_flags(
@@ -45,6 +46,7 @@ def _init_debugging_flags(
     val_check_interval: Optional[Union[int, float]],
     num_sanity_val_steps: int,
 ) -> None:
+    print("init_debugging_flags")
     # init debugging flags
     if isinstance(fast_dev_run, int) and (fast_dev_run < 0):
         raise MisconfigurationException(
@@ -64,15 +66,16 @@ def _init_debugging_flags(
     if isinstance(val_check_interval, str):
         # "DD:HH:MM:SS" → total seconds
         d, h, m, s = map(int, val_check_interval.split(":"))
-        trainer._val_check_time = timedelta(days=d, hours=h, minutes=m, seconds=s).total_seconds()
+        trainer.val_check_interval = timedelta(days=d, hours=h, minutes=m, seconds=s).total_seconds()
     elif isinstance(val_check_interval, dict):
-        trainer._val_check_time = timedelta(**val_check_interval).total_seconds()
+        trainer.val_check_interval = timedelta(**val_check_interval).total_seconds()
     elif isinstance(val_check_interval, timedelta):
-        trainer._val_check_time = val_check_interval.total_seconds()
+        trainer.val_check_interval = val_check_interval.total_seconds()
+    print(type(trainer.val_check_interval))
 
     # disable the old batch logic when using time
-    if trainer._val_check_time is not None:
-        trainer.val_check_interval = float("inf")
+    # if trainer.val_check_interval is not None:
+    #     trainer.val_check_interval = float("inf")
 
     if fast_dev_run:
         num_batches = int(fast_dev_run)
@@ -99,7 +102,7 @@ def _init_debugging_flags(
         trainer.limit_test_batches = _determine_batch_limits(limit_test_batches, "limit_test_batches")
         trainer.limit_predict_batches = _determine_batch_limits(limit_predict_batches, "limit_predict_batches")
         trainer.num_sanity_val_steps = float("inf") if num_sanity_val_steps == -1 else num_sanity_val_steps
-        if trainer._val_check_time is None:
+        if not isinstance(trainer.val_check_interval, float):
             trainer.val_check_interval = _determine_batch_limits(val_check_interval, "val_check_interval")
 
     if overfit_batches_enabled:

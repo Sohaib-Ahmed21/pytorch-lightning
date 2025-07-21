@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from datetime import timedelta
 import logging
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -285,8 +286,11 @@ class _FitLoop(_Loop):
 
         # store epoch of dataloader reset for reload_dataloaders_every_n_epochs
         self._last_train_dl_reload_epoch = trainer.current_epoch
-
-        if isinstance(trainer.val_check_interval, int):
+        if isinstance(trainer.val_check_interval, float):
+            trainer.val_check_batch = float("inf")
+            trainer._val_check_time = trainer.val_check_interval
+       
+        elif isinstance(trainer.val_check_interval, int):
             trainer.val_check_batch = trainer.val_check_interval
             if trainer.val_check_batch > self.max_batches and trainer.check_val_every_n_epoch is not None:
                 raise ValueError(

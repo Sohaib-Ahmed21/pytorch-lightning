@@ -308,6 +308,7 @@ class Trainer:
 
         """
         super().__init__()
+        rank_zero_info(f"Initializing trainer with parameters: {locals()}")
         log.debug(f"{self.__class__.__name__}: Initializing trainer with parameters: {locals()}")
 
         if default_root_dir is not None:
