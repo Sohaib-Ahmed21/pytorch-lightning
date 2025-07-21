@@ -519,13 +519,6 @@ class _TrainingEpochLoop(loops._Loop):
         """Decide if we should run validation."""
         if not self._should_check_val_epoch():
             return False
-        interval = self.trainer._val_check_time
-        if interval is not None:
-            now = time.time()
-            if now - self.trainer._last_val_time >= interval:
-                # time’s up → reset and tell Trainer to validate
-                self.trainer._last_val_time = now
-                return True
 
         # val_check_batch is inf for iterable datasets with no length defined
         is_infinite_dataset = self.trainer.val_check_batch == float("inf")
@@ -537,6 +530,14 @@ class _TrainingEpochLoop(loops._Loop):
             # allow validation if requesting to stop early through `Trainer.should_stop` (e.g. by early stopping)
             # and when the loop allows to stop (min_epochs/steps met)
             return True
+        
+        interval = self.trainer._val_check_time
+        if interval is not None:
+            now = time.time()
+            if now - self.trainer._last_val_time >= interval:
+                # time’s up → reset and tell Trainer to validate
+                return True
+            return False
 
         # TODO: let training/eval loop handle logic around limit_*_batches and val_check_batch
         is_val_check_batch = is_last_batch

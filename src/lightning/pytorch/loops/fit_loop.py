@@ -229,8 +229,6 @@ class _FitLoop(_Loop):
             return
 
         trainer = self.trainer
-        trainer._train_start_time = time.time()
-        trainer._last_val_time   = trainer._train_start_time
         pl_module = trainer.lightning_module
         if trainer.limit_train_batches == 0 or not is_overridden("training_step", pl_module):
             return
@@ -280,16 +278,17 @@ class _FitLoop(_Loop):
         max_batches = sized_len(combined_loader)
         self.max_batches = max_batches if max_batches is not None else float("inf")
         has_len_all_ranks_ = has_len_all_ranks(combined_loader, trainer.strategy, allow_zero_length)
-
+ 
         if self.max_batches == 0:
             return
 
         # store epoch of dataloader reset for reload_dataloaders_every_n_epochs
         self._last_train_dl_reload_epoch = trainer.current_epoch
-        if isinstance(trainer.val_check_interval, float):
-            trainer.val_check_batch = float("inf")
-            trainer._val_check_time = trainer.val_check_interval
-       
+        if trainer._val_check_time is not None:
+            trainer.val_check_batch = None
+            trainer._train_start_time = time.time()
+            trainer._last_val_time   = trainer._train_start_time
+
         elif isinstance(trainer.val_check_interval, int):
             trainer.val_check_batch = trainer.val_check_interval
             if trainer.val_check_batch > self.max_batches and trainer.check_val_every_n_epoch is not None:

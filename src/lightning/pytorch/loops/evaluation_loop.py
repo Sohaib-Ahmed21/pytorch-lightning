@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import math
+import time
 import os
 import shutil
 import sys
@@ -313,6 +314,9 @@ class _EvaluationLoop(_Loop):
 
         if self.verbose and self.trainer.is_global_zero:
             self._print_results(logged_outputs, self._stage.value)
+        
+        now = time.time()
+        self.trainer._last_val_time = now
 
         return logged_outputs
 
