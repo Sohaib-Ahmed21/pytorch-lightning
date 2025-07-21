@@ -14,6 +14,8 @@
 """Houses the methods used to set up the Trainer."""
 
 from typing import Optional, Union
+from datetime import timedelta
+import time
 
 import lightning.pytorch as pl
 from lightning.fabric.utilities.warnings import PossibleUserWarning
@@ -57,6 +59,21 @@ def _init_debugging_flags(
     trainer.overfit_batches = _determine_batch_limits(overfit_batches, "overfit_batches")
     overfit_batches_enabled = overfit_batches > 0
 
+    trainer._val_check_time = None
+
+    if isinstance(val_check_interval, str):
+        # "DD:HH:MM:SS" → total seconds
+        d, h, m, s = map(int, val_check_interval.split(":"))
+        trainer._val_check_time = timedelta(days=d, hours=h, minutes=m, seconds=s).total_seconds()
+    elif isinstance(val_check_interval, dict):
+        trainer._val_check_time = timedelta(**val_check_interval).total_seconds()
+    elif isinstance(val_check_interval, timedelta):
+        trainer._val_check_time = val_check_interval.total_seconds()
+
+    # disable the old batch logic when using time
+    if trainer._val_check_time is not None:
+        trainer.val_check_interval = float("inf")
+
     if fast_dev_run:
         num_batches = int(fast_dev_run)
         if not overfit_batches_enabled:
@@ -82,7 +99,8 @@ def _init_debugging_flags(
         trainer.limit_test_batches = _determine_batch_limits(limit_test_batches, "limit_test_batches")
         trainer.limit_predict_batches = _determine_batch_limits(limit_predict_batches, "limit_predict_batches")
         trainer.num_sanity_val_steps = float("inf") if num_sanity_val_steps == -1 else num_sanity_val_steps
-        trainer.val_check_interval = _determine_batch_limits(val_check_interval, "val_check_interval")
+        if trainer._val_check_time is not None:
+            trainer.val_check_interval = _determine_batch_limits(val_check_interval, "val_check_interval")
 
     if overfit_batches_enabled:
         trainer.limit_train_batches = overfit_batches

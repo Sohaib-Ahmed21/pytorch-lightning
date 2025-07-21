@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Union
 
 import torch
+import time
 from typing_extensions import override
 
 import lightning.pytorch as pl
@@ -227,6 +228,8 @@ class _FitLoop(_Loop):
             return
 
         trainer = self.trainer
+        trainer._train_start_time = time.time()
+        trainer._last_val_time   = trainer._train_start_time
         pl_module = trainer.lightning_module
         if trainer.limit_train_batches == 0 or not is_overridden("training_step", pl_module):
             return

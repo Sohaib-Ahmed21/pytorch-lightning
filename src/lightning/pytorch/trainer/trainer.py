@@ -109,7 +109,7 @@ class Trainer:
         limit_test_batches: Optional[Union[int, float]] = None,
         limit_predict_batches: Optional[Union[int, float]] = None,
         overfit_batches: Union[int, float] = 0.0,
-        val_check_interval: Optional[Union[int, float]] = None,
+        val_check_interval: Optional[Union[int, float, str, timedelta, dict[str,int]]] = None,
         check_val_every_n_epoch: Optional[int] = 1,
         num_sanity_val_steps: Optional[int] = None,
         log_every_n_steps: Optional[int] = None,

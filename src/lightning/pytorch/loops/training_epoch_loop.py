@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Optional, Union
 
 import torch
+import time
 from typing_extensions import override
 
 import lightning.pytorch as pl
@@ -518,6 +519,13 @@ class _TrainingEpochLoop(loops._Loop):
         """Decide if we should run validation."""
         if not self._should_check_val_epoch():
             return False
+        interval = self.trainer._val_check_time
+        if interval is not None:
+            now = time.time()
+            if now - self.trainer._last_val_time >= interval:
+                # time’s up → reset and tell Trainer to validate
+                self.trainer._last_val_time = now
+                return True
 
         # val_check_batch is inf for iterable datasets with no length defined
         is_infinite_dataset = self.trainer.val_check_batch == float("inf")
