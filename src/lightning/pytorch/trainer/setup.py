@@ -71,6 +71,7 @@ def _init_debugging_flags(
         trainer._val_check_time = timedelta(**val_check_interval).total_seconds()
     elif isinstance(val_check_interval, timedelta):
         trainer._val_check_time = val_check_interval.total_seconds()
+    trainer.val_check_interval = trainer._val_check_time
     print(type(trainer._val_check_time))
 
     # disable the old batch logic when using time
