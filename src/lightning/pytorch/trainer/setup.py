@@ -104,6 +104,7 @@ def _init_debugging_flags(
         trainer.limit_predict_batches = _determine_batch_limits(limit_predict_batches, "limit_predict_batches")
         trainer.num_sanity_val_steps = float("inf") if num_sanity_val_steps == -1 else num_sanity_val_steps
         if trainer._val_check_time is None:
+            print("helo")
             trainer.val_check_interval = _determine_batch_limits(val_check_interval, "val_check_interval")
 
     if overfit_batches_enabled:
@@ -134,9 +135,10 @@ def _determine_batch_limits(batches: Optional[Union[int, float]], name: str) -> 
         else:
             message = "100% of the batches will be used."
         rank_zero_info(f"`Trainer({name}=1.0)` was configured so {message}.")
-
+    print("hello")
     if 0 <= batches <= 1:
         return batches
+    print("hello")
     if batches > 1 and batches % 1.0 == 0:
         return int(batches)
     raise MisconfigurationException(

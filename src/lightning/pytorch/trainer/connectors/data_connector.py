@@ -63,7 +63,7 @@ class _DataConnector:
 
         if check_val_every_n_epoch is None and isinstance(val_check_interval, float):
             raise MisconfigurationException(
-                "`val_check_interval` should be an integer when `check_val_every_n_epoch=None`,"
+                "`val_check_interval` should be an integer or time based interval when `check_val_every_n_epoch=None`,"
                 f" found {val_check_interval!r}."
             )
 

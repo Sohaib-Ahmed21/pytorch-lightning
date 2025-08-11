@@ -1147,6 +1147,40 @@ def test_val_check_interval_checkpoint_files(tmp_path):
     files = {p.name for p in tmp_path.iterdir()}
     assert files == {f"epoch=0-step={s}.ckpt" for s in [2, 4, 6, 8, 10]}
 
+def test_time_based_val_check_interval_checkpoint_files(tmp_path):
+    call_count = {"count": 0}
+    # Each call to time.time advances by 2.1 seconds
+    def fake_time():
+        result = call_count["count"] * 2.1
+        call_count["count"] += 1
+        return result
+
+    with patch("time.time", side_effect=fake_time):
+        # Checkpoint at every validation (every 2 seconds)
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=tmp_path,
+            save_top_k=-1,
+            monitor=None,  # We just want all checkpoints saved
+        )
+        trainer = Trainer(
+            default_root_dir=tmp_path,
+            logger=False,
+            enable_checkpointing=True,
+            max_steps=5,   # 5 training steps (simulate 10s wall time, 5 validations)
+            limit_val_batches=1,
+            val_check_interval="00:00:00:02",  # every 2 seconds
+            callbacks=[checkpoint_callback],
+            enable_progress_bar=False,
+            enable_model_summary=False,
+        )
+        model = BoringModel()
+        trainer.fit(model)
+
+    # Check that a checkpoint was saved for every validation run (i.e., step=1 to step=5)
+    files = {p.name for p in tmp_path.iterdir() if p.name.endswith(".ckpt")}
+    expected_files = {f"epoch=0-step={s}.ckpt" for s in range(1, 6)}
+    assert files == expected_files, f"Expected checkpoint files: {expected_files}, got: {files}"
+
 
 def test_current_score(tmp_path):
     """Check that the current_score value is correct and was saved."""

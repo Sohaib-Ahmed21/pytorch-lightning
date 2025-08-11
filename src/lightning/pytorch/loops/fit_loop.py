@@ -286,6 +286,7 @@ class _FitLoop(_Loop):
         self._last_train_dl_reload_epoch = trainer.current_epoch
         if trainer._val_check_time is not None:
             trainer.val_check_batch = None
+            print("fd")
             trainer._train_start_time = time.time()
             trainer._last_val_time   = trainer._train_start_time
 
