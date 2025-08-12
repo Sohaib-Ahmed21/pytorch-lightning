@@ -196,7 +196,6 @@ def test_time_and_epoch_gated_val_check(tmp_path, check_val_every_n_epoch, val_c
             self.val_batches.append(trainer.fit_loop.epoch_loop.val_loop.batch_progress.total.completed)
         
         def on_validation_epoch_start(self) -> None:
-            # print(self.val_epoch_calls,"\n\ngj")
             self.val_epoch_calls += 1
 
     max_epochs = 5

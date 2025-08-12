@@ -521,7 +521,6 @@ class _TrainingEpochLoop(loops._Loop):
 
     def _should_check_val_fx(self, data_fetcher: _DataFetcher) -> bool:
         """Decide if we should run validation."""
-        print(self.trainer._last_val_time)
         if not self._should_check_val_epoch():
             return False
 
@@ -539,11 +538,9 @@ class _TrainingEpochLoop(loops._Loop):
         interval = self.trainer._val_check_time
         if interval is not None:
             now = time.time()
-            print("now", self.trainer._last_val_time, now )
             if now - self.trainer._last_val_time >= interval:
                 # time’s up → reset and tell Trainer to validate
                 return True
-            print("g")
             return False
 
         # TODO: let training/eval loop handle logic around limit_*_batches and val_check_batch

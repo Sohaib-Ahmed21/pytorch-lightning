@@ -306,7 +306,7 @@ class _FitLoop(_Loop):
                 else:
                     raise MisconfigurationException(
                         "When using an IterableDataset for `train_dataloader`,"
-                        " `Trainer(val_check_interval)` must be `1.0` or an int. An int k specifies"
+                        " `Trainer(val_check_interval)` must be time based, `1.0` or an int. An int k specifies"
                         " checking validation every k training batches."
                     )
             else:

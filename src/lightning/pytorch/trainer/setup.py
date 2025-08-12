@@ -61,18 +61,12 @@ def _init_debugging_flags(
     trainer.overfit_batches = _determine_batch_limits(overfit_batches, "overfit_batches")
     overfit_batches_enabled = overfit_batches > 0
 
-    trainer._val_check_time = None
-
-    if isinstance(val_check_interval, str):
-        # "DD:HH:MM:SS" → total seconds
-        d, h, m, s = map(int, val_check_interval.split(":"))
-        trainer._val_check_time = timedelta(days=d, hours=h, minutes=m, seconds=s).total_seconds()
-    elif isinstance(val_check_interval, dict):
-        trainer._val_check_time = timedelta(**val_check_interval).total_seconds()
-    elif isinstance(val_check_interval, timedelta):
-        trainer._val_check_time = val_check_interval.total_seconds()
-    trainer.val_check_interval = trainer._val_check_time
-    print(type(trainer._val_check_time))
+    # Simplify val_check_interval logic
+    if isinstance(val_check_interval, (str, dict, timedelta)):
+        trainer._val_check_time = _parse_val_check_interval(val_check_interval)
+        trainer.val_check_interval = trainer._val_check_time
+    else:
+        trainer._val_check_time = None
 
     # disable the old batch logic when using time
     # if trainer.val_check_interval is not None:
@@ -104,7 +98,6 @@ def _init_debugging_flags(
         trainer.limit_predict_batches = _determine_batch_limits(limit_predict_batches, "limit_predict_batches")
         trainer.num_sanity_val_steps = float("inf") if num_sanity_val_steps == -1 else num_sanity_val_steps
         if trainer._val_check_time is None:
-            print("helo")
             trainer.val_check_interval = _determine_batch_limits(val_check_interval, "val_check_interval")
 
     if overfit_batches_enabled:
@@ -211,3 +204,21 @@ def _log_device_info(trainer: "pl.Trainer") -> None:
 
         if HPUAccelerator.is_available() and not isinstance(trainer.accelerator, HPUAccelerator):
             rank_zero_warn("HPU available but not used. You can set it by doing `Trainer(accelerator='hpu')`.")
+
+
+def _parse_val_check_interval(val_check_interval):
+    """Helper function to parse and validate val_check_interval."""
+    if isinstance(val_check_interval, str):
+        # "DD:HH:MM:SS" → total seconds
+        d, h, m, s = map(int, val_check_interval.split(":"))
+        return timedelta(days=d, hours=h, minutes=m, seconds=s).total_seconds()
+    elif isinstance(val_check_interval, dict):
+        return timedelta(**val_check_interval).total_seconds()
+    elif isinstance(val_check_interval, timedelta):
+        return val_check_interval.total_seconds()
+    elif isinstance(val_check_interval, (int, float)):
+        return val_check_interval
+    else:
+        raise MisconfigurationException(
+            f"Invalid val_check_interval format: {val_check_interval}. Must be str, dict, timedelta, int, or float."
+        )
