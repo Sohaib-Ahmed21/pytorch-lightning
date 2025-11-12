@@ -82,7 +82,7 @@ class ClosureResult(OutputResult):
             # accumulate the loss. If ``accumulate_grad_batches == 1``, no effect
             # note: avoid in-place operation `x /= y` here on purpose
             closure_loss = closure_loss / normalize
-            print(closure_loss)
+            # print(closure_loss)
 
         return cls(closure_loss, extra=extra)
 
@@ -183,42 +183,153 @@ class _AutomaticOptimization(_Loop):
         super().__init__(trainer)
         self.optim_progress: _OptimizationProgress = _OptimizationProgress()
         self._skip_backward: bool = False
+        self._ga_loss_numer: Optional[Tensor] = None
+        self._ga_loss_total: int = 0
 
-    def run(self, optimizer: Optimizer, batch_idx: int, kwargs: OrderedDict) -> _OUTPUTS_TYPE:
-        """Runs closure (train step + backward) together with optimization if necessary.
+    def run(self, optimizer: Optimizer, batch_idx: int, kwargs: OrderedDict) -> dict[str, Any]:
+        """Runs the training step and handles gradient accumulation.
 
         Args:
-            kwargs: the kwargs passed down to the hooks
-            batch_idx: the current batch index.
-            optimizer: the optimizer
+            optimizer: The optimiser used for this training step.
+            batch_idx: Index of the current batch.
+            kwargs: The keyword arguments passed down to the hooks (contains
+                batch and potentially other information).
 
+        Returns:
+            A dictionary of detached outputs from ``training_step`` (e.g. for logging).
         """
-        closure = self._make_closure(kwargs, optimizer, batch_idx)
+        trainer = self.trainer
 
-        if (
-            # when the strategy handles accumulation, we want to always call the optimizer step
-            not self.trainer.strategy.handles_gradient_accumulation and self.trainer.fit_loop._should_accumulate()
-        ):
-            # For gradient accumulation
+        # We first run the user's ``training_step`` once to obtain a
+        # ``ClosureResult``.  This allows us to inspect any extra fields (like
+        # ``num_val_items``) without triggering backward or zero_grad yet.
+        # Note: ``_training_step`` internally calls ``post_training_step`` and
+        # applies our modified normalisation logic via ``ClosureResult``.
+        step_result: ClosureResult = self._training_step(kwargs)
 
-            # -------------------
-            # calculate loss (train step + train step end)
-            # -------------------
-            # automatic_optimization=True: perform ddp sync only when performing optimizer_step
-            with _block_parallel_sync_behavior(self.trainer.strategy, block=True):
-                closure()
+        # Check whether the user provided a token/element count for the loss.
+        # The presence of ``num_val_items`` indicates that we need to defer
+        # normalisation until gradient accumulation completes.
+        accumulator_active: bool = "num_val_items" in step_result.extra
 
-        # ------------------------------
-        # BACKWARD PASS
-        # ------------------------------
-        # gradient update with accumulated gradients
+        # Determine if this batch should contribute gradients now or later.  This
+        # mirrors Lightning's logic: when the strategy does not handle
+        # accumulation and we are in the middle of an accumulation window,
+        # ``_should_accumulate()`` returns True.
+        should_accumulate: bool = (
+            not trainer.strategy.handles_gradient_accumulation
+            and trainer.fit_loop._should_accumulate()
+        )
+
+        # If the user has not opted into the cross‑entropy fix, fall back to
+        # Lightning's default behaviour.  To preserve all original semantics we
+        # simply construct a closure again and delegate to the original logic.
+        if not accumulator_active:
+            # Rebuild a closure that wraps the training step and backward/zero_grad
+            closure = self._make_closure(kwargs, optimizer, batch_idx)
+
+            if should_accumulate:
+                # When accumulating, compute loss and backpropagate gradients.
+                # Synchronise DDP only on the last accumulation step.
+                with _block_parallel_sync_behavior(trainer.strategy, block=True):
+                    closure()
+            else:
+                # Final step in the accumulation window (or not accumulating at all).
+                self._optimizer_step(batch_idx, closure)
+
+            # Consume the result for logging and callbacks.  ``asdict`` returns
+            # the detached loss and any extra values returned by the user.
+            result = closure.consume_result()
+            if result.loss is None:
+                return {}
+            return result.asdict()
+
+        # ------------------------------------------------------------------
+        # Custom gradient accumulation path for CrossEntropyLoss (or similar)
+        # ------------------------------------------------------------------
+        # Retrieve the number of valid items contributing to this loss.  The
+        # maintainer's example uses the key ``num_val_items`` but we make no
+        # assumptions about its name beyond that it exists in ``extra``.
+        num_items = step_result.extra.get("num_val_items")
+        if not isinstance(num_items, int):
+            raise MisconfigurationException(
+                "When returning 'num_val_items' from training_step it must be an int."
+            )
+
+        # Accumulate the unnormalised loss (mean * count) and the count.  To
+        # maintain a computational graph across batches we store the running sum
+        # in a tensor.  ``step_result.closure_loss`` is the mean loss with
+        # gradients attached.  Note that we did **not** divide by
+        # ``accumulate_grad_batches`` above.
+        current_numer = step_result.closure_loss * num_items
+        if self._ga_loss_numer is None:
+            self._ga_loss_numer = current_numer
         else:
-            self._optimizer_step(batch_idx, closure)
+            # Important: build the sum in a way that preserves the graph.  We
+            # detach the running sum before adding the new tensor to avoid
+            # creating a deep computational tree which could lead to large
+            # memory usage.  The accumulator is a Tensor to which we reattach
+            # the graph at each addition.
+            self._ga_loss_numer = self._ga_loss_numer + current_numer
+        self._ga_loss_total += num_items
 
-        result = closure.consume_result()
-        if result.loss is None:
+        # Determine if we are still accumulating or if this is the last batch.
+        if should_accumulate:
+            # On the very first batch we need to zero gradients.  Lightning's
+            # original implementation calls zero_grad only once per
+            # accumulation window (when batch_idx % accumulate_grad_batches == 0).
+            is_first_batch_to_accumulate = batch_idx % trainer.accumulate_grad_batches == 0
+            if is_first_batch_to_accumulate:
+                self._on_before_zero_grad(optimizer)
+                self._optimizer_zero_grad(batch_idx, optimizer)
+            # Skip backward for this micro‑batch.  No gradients are computed
+            # until the end of the accumulation window.
+            # Nothing to return yet.
             return {}
-        return result.asdict()
+
+        # We have reached the end of the accumulation window (or
+        # accumulate_grad_batches==1).  Construct the aggregated loss by
+        # dividing the summed unnormalised losses by the total count.
+        aggregated_loss: Tensor = self._ga_loss_numer / float(self._ga_loss_total)
+        print("aggregated_loss:", self._ga_loss_total)
+
+        # Reset accumulation state for the next window.
+        self._ga_loss_numer = None
+        self._ga_loss_total = 0
+
+        # Prepare a new ``ClosureResult`` for the aggregated loss.  We reuse
+        # ``step_result.extra`` so that any additional values returned from
+        # ``training_step`` (e.g. logged metrics) are preserved.  Note that we
+        # deliberately set ``closure_loss`` to ``aggregated_loss`` here.
+        aggregated_result = ClosureResult(closure_loss=aggregated_loss, extra=step_result.extra)
+
+        # Build a closure around the aggregated loss.  We do not want to
+        # zero out gradients here because that already happened at the start of
+        # the accumulation window.  The closure's backward function simply
+        # performs backpropagation on the aggregated loss.
+        def aggregated_step_fn() -> ClosureResult:
+            return aggregated_result
+
+        def aggregated_backward_fn(loss: Tensor) -> None:
+            call._call_strategy_hook(trainer, "backward", loss, optimizer)
+
+        aggregated_closure = Closure(
+            step_fn=aggregated_step_fn,
+            backward_fn=aggregated_backward_fn,
+            zero_grad_fn=None,
+        )
+
+        # Perform the optimiser step just like the default Lightning path.  We
+        # delegate to ``_optimizer_step`` which handles hooks and updating the
+        # optimisation progress counters.  This call will invoke the
+        # ``optimizer_step`` hook on the LightningModule, passing in our
+        # aggregated closure.  The closure will be called exactly once by
+        # ``optimizer.step`` (if the optimiser honours the closure) and will
+        # compute the aggregated gradient.
+        self._optimizer_step(batch_idx, aggregated_closure)
+
+        # The detached loss and any extra values are returned to the trainer.
+        return aggregated_result.asdict()
 
     def _make_closure(self, kwargs: OrderedDict, optimizer: Optimizer, batch_idx: int) -> Closure:
         """Build a closure object that captures the given arguments and runs the `training_step` function and
