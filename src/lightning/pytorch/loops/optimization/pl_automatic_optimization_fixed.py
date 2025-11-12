@@ -25,7 +25,7 @@ loss by accumulating the *unnormalised* loss and the count across
 ``accumulate_grad_batches`` micro‑batches and then normalising once at the end.
 
 This patch implements exactly that logic.  The minimal user API change is to
-return a dictionary like ``{"loss": loss, "num_ignore_val": num_items}`` from
+return a dictionary like ``{"loss": loss, "num_val_items": num_items}`` from
 your ``training_step``.  When this key is present, the loss returned by
 ``CrossEntropyLoss(reduction='mean')`` will **not** be divided by
 ``accumulate_grad_batches`` immediately.  Instead the loop accumulates
@@ -33,7 +33,7 @@ your ``training_step``.  When this key is present, the loss returned by
 final micro‑batch in the accumulation window, a single backward pass is
 performed on the aggregated loss ``sum(loss_i * num_items_i) / sum(num_items_i)``.
 
-For all other types of loss (or when ``num_ignore_val`` is not provided) the
+For all other types of loss (or when ``num_val_items`` is not provided) the
 behaviour is identical to Lightning's default automatic optimisation.
 
 Note
@@ -84,7 +84,7 @@ class ClosureResult(OutputResult):
 
     ``ClosureResult`` differs from the upstream implementation only in its
     ``from_training_step_output`` method.  When the user returns
-    ``{"num_ignore_val": count}`` alongside their loss, this function will skip
+    ``{"num_val_items": count}`` alongside their loss, this function will skip
     the default normalisation by ``accumulate_grad_batches``.  The actual
     normalisation is deferred until the end of the accumulation window.
     """
@@ -125,11 +125,11 @@ class ClosureResult(OutputResult):
             )
 
         # Determine whether to apply Lightning's default normalisation.  If the
-        # user supplied ``num_ignore_val`` then we defer normalisation until
+        # user supplied ``num_val_items`` then we defer normalisation until
         # accumulation is finished.  Otherwise we divide by ``normalize`` (which
         # typically equals ``accumulate_grad_batches``).
         if closure_loss is not None:
-            if isinstance(training_step_output, Mapping) and "num_ignore_val" in training_step_output:
+            if isinstance(training_step_output, Mapping) and "num_val_items" in training_step_output:
                 # Do not normalise here.  Raw per‑batch mean loss is required
                 # so that we can weight it by the number of valid items.
                 pass
@@ -195,7 +195,7 @@ class AutomaticOptimization(_Loop):
 
     This class mirrors Lightning's private ``_AutomaticOptimization`` loop but
     introduces a fix for gradient accumulation when the user returns
-    ``num_ignore_val`` from ``training_step``.  In that case the mean loss
+    ``num_val_items`` from ``training_step``.  In that case the mean loss
     returned from the loss function is **not** immediately scaled by
     ``accumulate_grad_batches``.  Instead, the loop accumulates the weighted
     losses and counts over multiple micro‑batches, and performs a single
@@ -231,15 +231,15 @@ class AutomaticOptimization(_Loop):
 
         # We first run the user's ``training_step`` once to obtain a
         # ``ClosureResult``.  This allows us to inspect any extra fields (like
-        # ``num_ignore_val``) without triggering backward or zero_grad yet.
+        # ``num_val_items``) without triggering backward or zero_grad yet.
         # Note: ``_training_step`` internally calls ``post_training_step`` and
         # applies our modified normalisation logic via ``ClosureResult``.
         step_result: ClosureResult = self._training_step(kwargs)
 
         # Check whether the user provided a token/element count for the loss.
-        # The presence of ``num_ignore_val`` indicates that we need to defer
+        # The presence of ``num_val_items`` indicates that we need to defer
         # normalisation until gradient accumulation completes.
-        accumulator_active: bool = "num_ignore_val" in step_result.extra
+        accumulator_active: bool = "num_val_items" in step_result.extra
 
         # Determine if this batch should contribute gradients now or later.  This
         # mirrors Lightning's logic: when the strategy does not handle
@@ -277,12 +277,12 @@ class AutomaticOptimization(_Loop):
         # Custom gradient accumulation path for CrossEntropyLoss (or similar)
         # ------------------------------------------------------------------
         # Retrieve the number of valid items contributing to this loss.  The
-        # maintainer's example uses the key ``num_ignore_val`` but we make no
+        # maintainer's example uses the key ``num_val_items`` but we make no
         # assumptions about its name beyond that it exists in ``extra``.
-        num_items = step_result.extra.get("num_ignore_val")
+        num_items = step_result.extra.get("num_val_items")
         if not isinstance(num_items, int):
             raise MisconfigurationException(
-                "When returning 'num_ignore_val' from training_step it must be an int."
+                "When returning 'num_val_items' from training_step it must be an int."
             )
 
         # Accumulate the unnormalised loss (mean * count) and the count.  To
