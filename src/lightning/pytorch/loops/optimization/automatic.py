@@ -69,6 +69,7 @@ class ClosureResult(OutputResult):
                     "In automatic_optimization, when `training_step` returns a dict, the 'loss' key needs to be present"
                 )
             extra = {k: v for k, v in training_step_output.items() if k != "loss"}
+            # print(extra)
         elif isinstance(training_step_output, Tensor):
             closure_loss = training_step_output
         elif training_step_output is not None:
@@ -81,6 +82,7 @@ class ClosureResult(OutputResult):
             # accumulate the loss. If ``accumulate_grad_batches == 1``, no effect
             # note: avoid in-place operation `x /= y` here on purpose
             closure_loss = closure_loss / normalize
+            print(closure_loss)
 
         return cls(closure_loss, extra=extra)
 
@@ -149,6 +151,28 @@ class Closure(AbstractClosure[ClosureResult]):
 
 _OUTPUTS_TYPE = dict[str, Any]
 
+def _fix_cross_entropy(batch, loss):
+    """Adjust CrossEntropyLoss to handle gradient accumulation correctly.
+
+    Converts mean reduction -> sum, counts valid (non-ignored) tokens,
+    and returns (fixed_loss, num_items).
+    """
+    ignore_index = getattr(loss, "ignore_index", -100)
+    reduction = getattr(loss, "reduction", "mean")
+
+    # Detect tokens/items in batch
+    num_items = None
+    if isinstance(batch, dict) and "labels" in batch:
+        labels = batch["labels"]
+        if labels.ndim >= 2:
+            num_items = int((labels != ignore_index).sum().item())
+        else:
+            num_items = labels.numel()
+
+    # only fix mean reduction (sum already fine)
+    if reduction == "mean" and num_items is not None and num_items > 0:
+        loss = loss * num_items  # make it equivalent to summed loss
+    return loss, num_items
 
 class _AutomaticOptimization(_Loop):
     """Performs automatic optimization (forward, zero grad, backward, optimizer step)"""
